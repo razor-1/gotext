@@ -7,8 +7,10 @@ package gotext
 
 import (
 	"os"
-	"path"
+	"path/filepath"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
 )
 
 func TestLocale(t *testing.T) {
@@ -62,14 +64,14 @@ msgstr "More Translation"
 	`
 
 	// Create Locales directory with simplified language code
-	dirname := path.Join("/tmp", "en", "LC_MESSAGES")
+	dirname := filepath.Join("/tmp", "en", "LC_MESSAGES")
 	err := os.MkdirAll(dirname, os.ModePerm)
 	if err != nil {
 		t.Fatalf("Can't create test directory: %s", err.Error())
 	}
 
 	// Write PO content to file
-	filename := path.Join(dirname, "my_domain.po")
+	filename := filepath.Join(dirname, "my_domain.po")
 
 	f, err := os.Create(filename)
 	if err != nil {
@@ -192,14 +194,14 @@ msgstr "More Translation"
 	`
 
 	// Create Locales directory with simplified language code
-	dirname := path.Join("/tmp", "en", "LC_MESSAGES")
+	dirname := filepath.Join("/tmp", "en", "LC_MESSAGES")
 	err := os.MkdirAll(dirname, os.ModePerm)
 	if err != nil {
 		t.Fatalf("Can't create test directory: %s", err.Error())
 	}
 
 	// Write PO content to file
-	filename := path.Join(dirname, "my_domain.po")
+	filename := filepath.Join(dirname, "my_domain.po")
 
 	f, err := os.Create(filename)
 	if err != nil {
@@ -425,14 +427,14 @@ msgstr[2] "And this is the second plural form: %s"
 	`
 
 	// Create Locales directory with simplified language code
-	dirname := path.Join("/tmp", "es")
+	dirname := filepath.Join("/tmp", "es")
 	err := os.MkdirAll(dirname, os.ModePerm)
 	if err != nil {
 		t.Fatalf("Can't create test directory: %s", err.Error())
 	}
 
 	// Write PO content to file
-	filename := path.Join(dirname, "race.po")
+	filename := filepath.Join(dirname, "race.po")
 
 	f, err := os.Create(filename)
 	if err != nil {
@@ -473,17 +475,15 @@ msgstr[2] "And this is the second plural form: %s"
 }
 
 func TestAddTranslator(t *testing.T) {
-	// Create po object
-	po := new(Po)
-
 	// Parse file
-	po.ParseFile("fixtures/en_US/default.po")
+	po, err := ParseFile("fixtures/en_US/default.po")
+	assert.NoError(t, err)
 
 	// Create Locale
 	l := NewLocale("", "en")
 
-	// Add PO Translator to Locale object
-	l.AddTranslator("default", po)
+	// Add PO to Locale object
+	l.AddFile("default", po)
 
 	// Test translations
 	tr := l.Get("My text")

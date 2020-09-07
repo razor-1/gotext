@@ -5,21 +5,56 @@
 
 package gotext
 
-import "net/textproto"
+import (
+	"errors"
+	"io/ioutil"
+	"net/textproto"
+	"os"
+	"path/filepath"
+)
 
-// Translator interface is used by Locale and Po objects.Translator
-// It contains all methods needed to parse translation sources and obtain corresponding translations.
-// Also implements gob.GobEncoder/gob.DobDecoder interfaces to allow serialization of Locale objects.
-type Translator interface {
-	ParseFile(f string)
+// ParseFile tries to read the file by its provided path (f) and parse its content as a .po or .mo file.
+func ParseFile(f string) (gt GettextFile, err error) {
+	// Check if file exists
+	info, err := os.Stat(f)
+	if err != nil {
+		return
+	}
+
+	// Check that isn't a directory
+	if info.IsDir() {
+		err = errors.New("cannot parse a directory")
+		return
+	}
+
+	ext := filepath.Ext(f)
+	if ext == ".po" {
+		gt = NewPo()
+	} else if ext == ".mo" {
+		gt = NewMo()
+	} else {
+		err = errors.New("unknown file type")
+		return
+	}
+
+	// Parse file content
+	data, err := ioutil.ReadFile(f)
+	if err != nil {
+		return
+	}
+
+	gt.Parse(data)
+
+	return gt, nil
+}
+
+type GettextFile interface {
 	Parse(buf []byte)
+	GetDomain() *Domain
 	Get(str string, vars ...interface{}) string
 	GetN(str, plural string, n int, vars ...interface{}) string
 	GetC(str, ctx string, vars ...interface{}) string
 	GetNC(str, plural string, n int, ctx string, vars ...interface{}) string
-
-	MarshalBinary() ([]byte, error)
-	UnmarshalBinary([]byte) error
 }
 
 // TranslatorEncoding is used as intermediary storage to encode Translator objects to Gob.
@@ -42,18 +77,20 @@ type TranslatorEncoding struct {
 	Contexts     map[string]map[string]*Translation
 }
 
-// GetTranslator is used to recover a Translator object after unmarshaling the TranslatorEncoding object.
-// Internally uses a Po object as it should be switcheable with Mo objects without problem.
-// External Translator implementations should be able to serialize into a TranslatorEncoding object in order to unserialize into a Po-compatible object.
-func (te *TranslatorEncoding) GetTranslator() Translator {
+// GetTranslator is used to recover a Translator object after unmarshalling the TranslatorEncoding object.
+// Internally uses a Po object as it should be switchable with Mo objects without problem.
+// External Translator implementations should be able to serialize into a TranslatorEncoding object in order to
+// deserialize into a Po-compatible object.
+func (te *TranslatorEncoding) GetFile() GettextFile {
 	po := new(Po)
-	po.Headers = te.Headers
-	po.Language = te.Language
-	po.PluralForms = te.PluralForms
-	po.nplurals = te.Nplurals
-	po.plural = te.Plural
-	po.translations = te.Translations
-	po.contexts = te.Contexts
+	po.domain = NewDomain()
+	po.domain.Headers = te.Headers
+	po.domain.Language = te.Language
+	po.domain.PluralForms = te.PluralForms
+	po.domain.nplurals = te.Nplurals
+	po.domain.plural = te.Plural
+	po.domain.translations = te.Translations
+	po.domain.contexts = te.Contexts
 
 	return po
 }

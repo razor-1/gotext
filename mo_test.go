@@ -9,18 +9,20 @@ import (
 	"os"
 	"path"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
 )
 
 func TestMo_Get(t *testing.T) {
-
-	// Create po object
-	mo := new(Mo)
+	ta := assert.New(t)
 
 	// Try to parse a directory
-	mo.ParseFile(path.Clean(os.TempDir()))
+	mo, err := ParseFile(path.Clean(os.TempDir()))
+	ta.Error(err)
 
 	// Parse file
-	mo.ParseFile("fixtures/en_US/default.mo")
+	mo, err = ParseFile("fixtures/en_US/default.mo")
+	ta.NoError(err)
 
 	// Test translations
 	tr := mo.Get("My text")
@@ -35,15 +37,8 @@ func TestMo_Get(t *testing.T) {
 }
 
 func TestMo(t *testing.T) {
-
-	// Create po object
-	mo := new(Mo)
-
-	// Try to parse a directory
-	mo.ParseFile(path.Clean(os.TempDir()))
-
 	// Parse file
-	mo.ParseFile("fixtures/en_US/default.mo")
+	mo, _ := ParseFile("fixtures/en_US/default.mo")
 
 	// Test translations
 	tr := mo.Get("My text")
@@ -144,18 +139,18 @@ func TestMo(t *testing.T) {
 }
 
 func TestMoRace(t *testing.T) {
-
-	// Create Po object
-	mo := new(Mo)
+	// Create Mo object
+	mo := NewMo()
 
 	// Create sync channels
 	pc := make(chan bool)
 	rc := make(chan bool)
 
-	// Parse po content in a goroutine
-	go func(mo *Mo, done chan bool) {
+	// Parse mo content in a goroutine
+	go func(gt GettextFile, done chan bool) {
 		// Parse file
-		mo.ParseFile("fixtures/en_US/default.mo")
+		gt, err := ParseFile("fixtures/en_US/default.mo")
+		assert.NoError(t, err)
 		done <- true
 	}(mo, pc)
 
@@ -174,24 +169,24 @@ func TestMoRace(t *testing.T) {
 }
 
 func TestNewMoTranslatorRace(t *testing.T) {
-
 	// Create Po object
-	mo := NewMoTranslator()
+	mo := NewMo()
 
 	// Create sync channels
 	pc := make(chan bool)
 	rc := make(chan bool)
 
 	// Parse po content in a goroutine
-	go func(mo Translator, done chan bool) {
+	go func(gt GettextFile, done chan bool) {
 		// Parse file
-		mo.ParseFile("fixtures/en_US/default.mo")
+		gt, err := ParseFile("fixtures/en_US/default.mo")
+		assert.NoError(t, err)
 		done <- true
 	}(mo, pc)
 
 	// Read some Translation on a goroutine
-	go func(mo Translator, done chan bool) {
-		mo.Get("My text")
+	go func(gt GettextFile, done chan bool) {
+		gt.Get("My text")
 		done <- true
 	}(mo, rc)
 
@@ -205,18 +200,18 @@ func TestNewMoTranslatorRace(t *testing.T) {
 
 func TestMoBinaryEncoding(t *testing.T) {
 	// Create mo objects
-	mo := new(Mo)
-	mo2 := new(Mo)
+	mo2 := NewMo()
 
 	// Parse file
-	mo.ParseFile("fixtures/en_US/default.mo")
+	mo, err := ParseFile("fixtures/en_US/default.mo")
+	assert.NoError(t, err)
 
-	buff, err := mo.MarshalBinary()
+	buff, err := mo.GetDomain().MarshalBinary()
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	err = mo2.UnmarshalBinary(buff)
+	err = mo2.GetDomain().UnmarshalBinary(buff)
 	if err != nil {
 		t.Fatal(err)
 	}

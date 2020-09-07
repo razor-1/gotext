@@ -8,9 +8,20 @@ package gotext
 import (
 	"bytes"
 	"encoding/gob"
+	"errors"
+	"fmt"
 	"os"
-	"path"
+	"path/filepath"
+	"strings"
 	"sync"
+	"time"
+
+	"github.com/razor-1/localizer/store"
+	"golang.org/x/text/language"
+)
+
+const (
+	LCMessages = "LC_MESSAGES"
 )
 
 /*
@@ -52,8 +63,10 @@ type Locale struct {
 	// Language for this Locale
 	lang string
 
+	tag language.Tag
+
 	// List of available Domains for this locale.
-	Domains map[string]Translator
+	Domains map[string]*Domain
 
 	// First AddDomain is default Domain
 	defaultDomain string
@@ -64,34 +77,38 @@ type Locale struct {
 
 // NewLocale creates and initializes a new Locale object for a given language.
 // It receives a path for the i18n .po/.mo files directory (p) and a language code to use (l).
-func NewLocale(p, l string) *Locale {
+func NewLocale(path, locale string) *Locale {
+	processedLocale := SimplifiedLocale(locale)
 	return &Locale{
-		path:    p,
-		lang:    SimplifiedLocale(l),
-		Domains: make(map[string]Translator),
+		path:    path,
+		lang:    processedLocale,
+		tag:     language.Make(processedLocale),
+		Domains: make(map[string]*Domain),
 	}
 }
 
+//findExt finds a file for the specified domain and extension (typically either a .po or .mo file)
 func (l *Locale) findExt(dom, ext string) string {
-	filename := path.Join(l.path, l.lang, "LC_MESSAGES", dom+"."+ext)
-	if _, err := os.Stat(filename); err == nil {
-		return filename
-	}
+	base := dom + "." + ext
+	underscoreLang := strings.Replace(l.tag.String(), "-", "_", -1)
+	options := make([]string, 3, 8)
+	options[0] = filepath.Join(l.path, l.lang, LCMessages, base)
+	options[1] = filepath.Join(l.path, l.tag.String(), LCMessages, base)
+	options[2] = filepath.Join(l.path, underscoreLang, LCMessages, base)
 
 	if len(l.lang) > 2 {
-		filename = path.Join(l.path, l.lang[:2], "LC_MESSAGES", dom+"."+ext)
-		if _, err := os.Stat(filename); err == nil {
-			return filename
-		}
+		options = append(options, filepath.Join(l.path, l.lang[:2], LCMessages, base))
 	}
 
-	filename = path.Join(l.path, l.lang, dom+"."+ext)
-	if _, err := os.Stat(filename); err == nil {
-		return filename
-	}
+	options = append(options, filepath.Join(l.path, l.lang, base))
+	options = append(options, filepath.Join(l.path, l.tag.String(), base))
+	options = append(options, filepath.Join(l.path, underscoreLang, base))
 
 	if len(l.lang) > 2 {
-		filename = path.Join(l.path, l.lang[:2], dom+"."+ext)
+		options = append(options, filepath.Join(l.path, l.lang[:2], base))
+	}
+
+	for _, filename := range options {
 		if _, err := os.Stat(filename); err == nil {
 			return filename
 		}
@@ -100,54 +117,74 @@ func (l *Locale) findExt(dom, ext string) string {
 	return ""
 }
 
-// AddDomain creates a new domain for a given locale object and initializes the Po object.
-// If the domain exists, it gets reloaded.
-func (l *Locale) AddDomain(dom string) {
-	var poObj Translator
-
-	file := l.findExt(dom, "po")
-	if file != "" {
-		poObj = new(Po)
-		// Parse file.
-		poObj.ParseFile(file)
-	} else {
-		file = l.findExt(dom, "mo")
-		if file != "" {
-			poObj = new(Mo)
-			// Parse file.
-			poObj.ParseFile(file)
-		} else {
-			// fallback return if no file found with
-			return
-		}
+func modTime(file string) (tm time.Time) {
+	if file == "" {
+		return
 	}
 
-	// Save new domain
-	l.Lock()
+	stat, err := os.Stat(file)
+	if err == nil {
+		tm = stat.ModTime()
+	}
 
+	return
+}
+
+//selectFile determines whether to read the .mo or .po file based on last modified time, and returns the file name
+//it returns the empty string "" if no file can be found
+func (l *Locale) selectFile(dom string) string {
+	pofile := l.findExt(dom, "po")
+	mofile := l.findExt(dom, "mo")
+
+	poTime := modTime(pofile)
+	moTime := modTime(mofile)
+
+	//we want to use the .mo file. use it if it's present, unless the .po file is newer.
+	if poTime.After(moTime) {
+		return pofile
+	} else if !moTime.IsZero() {
+		return mofile
+	}
+
+	return ""
+}
+
+// AddDomain creates a new domain for a given locale object
+// If the domain exists, it gets reloaded.
+func (l *Locale) AddDomain(dom string) error {
+	file := l.selectFile(dom)
+	if file == "" {
+		return errors.New("no mo or po file found")
+	}
+	gt, err := ParseFile(file)
+	if err != nil {
+		return err
+	}
+
+	l.Lock()
+	defer l.Unlock()
 	if l.Domains == nil {
-		l.Domains = make(map[string]Translator)
+		l.Domains = make(map[string]*Domain)
 	}
 	if l.defaultDomain == "" {
 		l.defaultDomain = dom
 	}
-	l.Domains[dom] = poObj
+	l.Domains[dom] = gt.GetDomain()
 
-	// Unlock "Save new domain"
-	l.Unlock()
+	return nil
 }
 
 // AddTranslator takes a domain name and a Translator object to make it available in the Locale object.
-func (l *Locale) AddTranslator(dom string, tr Translator) {
+func (l *Locale) AddFile(dom string, gt GettextFile) {
 	l.Lock()
 
 	if l.Domains == nil {
-		l.Domains = make(map[string]Translator)
+		l.Domains = make(map[string]*Domain)
 	}
 	if l.defaultDomain == "" {
 		l.defaultDomain = dom
 	}
-	l.Domains[dom] = tr
+	l.Domains[dom] = gt.GetDomain()
 
 	l.Unlock()
 }
@@ -165,6 +202,26 @@ func (l *Locale) SetDomain(dom string) {
 	l.Lock()
 	l.defaultDomain = dom
 	l.Unlock()
+}
+
+//GetTranslations conforms us to the store.TranslationStore interface
+func (l *Locale) GetTranslations(tag language.Tag) (lc store.LocaleCatalog, err error) {
+	if l.tag != tag {
+		err = fmt.Errorf("tags do not match: %v != %v", l.tag, tag)
+		return
+	}
+
+	lc = store.NewLocaleCatalog(tag)
+	lc.Path = l.path
+	l.RLock()
+	defer l.RUnlock()
+	for _, translator := range l.Domains {
+		for msgID, msg := range translator.GetAll() {
+			lc.Translations[msgID] = msg
+		}
+	}
+
+	return
 }
 
 // Get uses a domain "default" to return the corresponding Translation of a given string.
@@ -317,7 +374,7 @@ func (l *Locale) UnmarshalBinary(data []byte) error {
 	l.path = obj.Path
 
 	// Decode Domains
-	l.Domains = make(map[string]Translator)
+	l.Domains = make(map[string]*Domain)
 	for k, v := range obj.Domains {
 		var tr TranslatorEncoding
 		buff := bytes.NewBuffer(v)
@@ -327,7 +384,7 @@ func (l *Locale) UnmarshalBinary(data []byte) error {
 			return err
 		}
 
-		l.Domains[k] = tr.GetTranslator()
+		l.Domains[k] = tr.GetFile().GetDomain()
 	}
 
 	return nil
