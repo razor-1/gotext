@@ -9,6 +9,12 @@ import (
 	"os"
 	"path"
 	"testing"
+
+	"golang.org/x/text/language"
+)
+
+const (
+	en_US = "en_US"
 )
 
 func TestLocale(t *testing.T) {
@@ -62,7 +68,7 @@ msgstr "More Translation"
 	`
 
 	// Create Locales directory with simplified language code
-	dirname := path.Join("/tmp", "en", "LC_MESSAGES")
+	dirname := path.Join("/tmp", "en", LCMessages)
 	err := os.MkdirAll(dirname, os.ModePerm)
 	if err != nil {
 		t.Fatalf("Can't create test directory: %s", err.Error())
@@ -93,8 +99,8 @@ msgstr "More Translation"
 
 	// Test translations
 	tr := l.GetD("my_domain", "My text")
-	if tr != "Translated text" {
-		t.Errorf("Expected 'Translated text' but got '%s'", tr)
+	if tr != translatedText {
+		t.Errorf("Expected '%s' but got '%s'", translatedText, tr)
 	}
 
 	v := "Variable"
@@ -192,7 +198,7 @@ msgstr "More Translation"
 	`
 
 	// Create Locales directory with simplified language code
-	dirname := path.Join("/tmp", "en", "LC_MESSAGES")
+	dirname := path.Join("/tmp", "en", LCMessages)
 	err := os.MkdirAll(dirname, os.ModePerm)
 	if err != nil {
 		t.Fatalf("Can't create test directory: %s", err.Error())
@@ -474,7 +480,7 @@ msgstr[2] "And this is the second plural form: %s"
 
 func TestAddTranslator(t *testing.T) {
 	// Create po object
-	po := new(Po)
+	po := NewPo()
 
 	// Parse file
 	po.ParseFile("fixtures/en_US/default.po")
@@ -487,8 +493,8 @@ func TestAddTranslator(t *testing.T) {
 
 	// Test translations
 	tr := l.Get("My text")
-	if tr != "Translated text" {
-		t.Errorf("Expected 'Translated text' but got '%s'", tr)
+	if tr != translatedText {
+		t.Errorf("Expected '%s' but got '%s'", translatedText, tr)
 	}
 	// Test translations
 	tr = l.Get("language")
@@ -599,5 +605,36 @@ func TestLocaleBinaryEncoding(t *testing.T) {
 	}
 	if l.GetN("One with var: %s", "Several with vars: %s", 3, "VALUE") != l2.GetN("One with var: %s", "Several with vars: %s", 3, "VALUE") {
 		t.Errorf("'%s' is different from '%s", l.GetN("One with var: %s", "Several with vars: %s", 3, "VALUE"), l2.GetN("One with var: %s", "Several with vars: %s", 3, "VALUE"))
+	}
+}
+
+func TestLocaleGetTranslations(t *testing.T) {
+	l := NewLocale("fixtures/", en_US)
+	l.AddDomain("default")
+
+	tag := language.Make(en_US)
+	lc, err := l.GetTranslations(tag)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if lc.Tag != tag {
+		t.Errorf("expected tag to be %s but got %s", tag.String(), lc.Tag.String())
+	}
+	if lc.Path != l.path {
+		t.Errorf("expected path to be %s but got %s", l.path, lc.Path)
+	}
+	if len(lc.Translations) < 5 {
+		t.Errorf("number of translations is too small: got %d", len(lc.Translations))
+	}
+
+	const msgID = "My text"
+	const msgStr = "Translated text"
+	tr, ok := lc.Translations[msgID]
+	if !ok {
+		t.Error("Missing expected translation")
+	}
+	if tr.Get() != msgStr {
+		t.Errorf("expected translation to be \"%s\" but got \"%s\"", msgStr, tr.Get())
 	}
 }
